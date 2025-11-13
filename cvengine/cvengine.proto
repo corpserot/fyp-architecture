@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package cvengine;
+
+service CVEngineService {
+  rpc DetectObjects(stream ImageFrame) returns (stream DetectionResult);
+}
+
+message ImageFrame {
+  bytes image_data = 1;
+  int64 timestamp = 2;
+}
+
+message BoundingBox {
+  float xmin = 1;
+  float ymin = 2;
+  float xmax = 3;
+  float ymax = 4;
+}
+
+message DetectedObject {
+  string class_name = 1;
+  float confidence = 2;
+  BoundingBox bbox = 3;
+}
+
+message DetectionResult {
+  repeated DetectedObject objects = 1;
+  int64 timestamp = 2;
+}
