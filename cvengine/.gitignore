@@ -1,6 +1,7 @@
 models/
 !models/trained_yolov12*.pt
 logs*/
+results/
 test_images/
 
 cvengine*log.txt

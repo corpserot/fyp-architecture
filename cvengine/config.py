@@ -6,6 +6,7 @@ MODEL = 'detect-n.pt' # Choose from models/
 ADDRESS = '127.0.0.1'
 PORT = '5501'
 MAX_FRAME_QUEUE_SIZE = 5 # Max frames to buffer before skipping
+SAVE_DETECTIONS = False
 
 logging.basicConfig(
   level=logging.INFO,
