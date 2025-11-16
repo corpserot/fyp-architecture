@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oklch Color Palette</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .palette-grid {
+            display: grid;
+            gap: 2px;
+            border: 1px solid #ccc;
+            padding: 5px;
+            background-color: #fff;
+            max-width: fit-content;
+        }
+        .color-cell {
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7em;
+            color: #333;
+            text-shadow: 0 0 2px rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+        .color-cell.dark-text {
+            color: #eee;
+            text-shadow: 0 0 2px rgba(0, 0, 0, 0.7);
+        }
+    </style>
+</head>
+<body>
+    <h1>Oklch Color Palette Visualization</h1>
+    <div id="paletteContainer"></div>
+
+    <script>
+        // Function to determine if text should be dark or light based on Oklch L value
+        function getTextColorClass(L) {
+            // L (Lightness) in Oklch is 0-1. A threshold of 0.5 is a good starting point.
+            return L < 0.7 ? 'dark-text' : '';
+        }
+
+        async function loadAndDisplayPalette() {
+            const csvFilePath = 'palette.csv'; // Updated CSV file path
+            const paletteContainer = document.getElementById('paletteContainer');
+
+            try {
+                const response = await fetch(csvFilePath);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const csvText = await response.text();
+                const rows = csvText.trim().split('\n');
+
+                if (rows.length === 0) {
+                    paletteContainer.textContent = 'No palette data found.';
+                    return;
+                }
+
+                // Determine grid columns based on the first row
+                const firstRowValues = rows[0].split(',').map(Number);
+                const countHueSteps = firstRowValues.length / 3;
+
+                paletteContainer.style.gridTemplateColumns = `repeat(${countHueSteps}, 1fr)`;
+                paletteContainer.classList.add('palette-grid');
+
+                rows.forEach(rowText => {
+                    const values = rowText.split(',').map(Number);
+                    for (let i = 0; i < values.length; i += 3) {
+                        const L = values[i];
+                        const C = values[i + 1];
+                        const h = values[i + 2];
+
+                        console.log(`Parsing L: ${L}, C: ${C}, h: ${h}`); // Debug log
+
+                        // Check if C is a valid number before calling toFixed
+                        if (typeof C !== 'number' || isNaN(C)) {
+                            console.error(`Invalid C value encountered: ${C} at index ${i + 1} in row: ${rowText}`);
+                            // Skip this cell or handle the error gracefully
+                            continue;
+                        }
+
+                        // Use oklch() directly in CSS
+                        const oklchCss = `oklch(${L * 100}% ${C} ${h})`;
+                        const cell = document.createElement('div');
+                        cell.className = `color-cell ${getTextColorClass(L)}`;
+                        cell.style.backgroundColor = oklchCss;
+                        cell.title = `L: ${L.toFixed(2)}, C: ${C.toFixed(2)}, h: ${h.toFixed(2)}`;
+                        cell.textContent = `${L.toFixed(2)}`; // Display lightness for context
+
+                        paletteContainer.appendChild(cell);
+                    }
+                });
+
+            } catch (error) {
+                paletteContainer.textContent = `Error loading or parsing palette: ${error}`;
+                console.error('Error:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadAndDisplayPalette);
+    </script>
+</body>
+</html>
