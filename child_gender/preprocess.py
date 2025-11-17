@@ -1,7 +1,7 @@
 import os
+import shutil
 
 import albumentations as A
-from albumentations.pytorch import ToTensorV2
 import cv2
 import numpy as np
 from tqdm import tqdm
@@ -214,6 +214,7 @@ def augment_and_save_data(data_list, output_base_path, split_name, aug_pipeline=
 # Main execution block
 if __name__ == '__main__':
     pp_pipeline = preprocess_pipeline()
+    aug_identity = A.Compose([])
     aug_pipeline = augmentation_pipeline()
 
     train_data_preprocessed = load_and_preprocess_split(pp_pipeline, 'train')
@@ -221,13 +222,15 @@ if __name__ == '__main__':
     test_data_preprocessed = load_and_preprocess_split(pp_pipeline, 'test')
 
     # Augment and save train data incrementally
-    augment_and_save_data(train_data_preprocessed, OUTPUT_PATH, 'train', A.Compose([]), aug_per_image=0)
+    augment_and_save_data(train_data_preprocessed, OUTPUT_PATH, 'train', aug_identity, aug_per_image=0)
 
     # Save valid and test data directly (no augmentation for these splits)
     # For valid and test, we just save the preprocessed data.
     # The `augment_and_save_data` function can be used with aug_per_image=0
     # to just save the original preprocessed images.
-    augment_and_save_data(valid_data_preprocessed, OUTPUT_PATH, 'valid', A.Compose([]), aug_per_image=0)
-    augment_and_save_data(test_data_preprocessed, OUTPUT_PATH, 'test', A.Compose([]), aug_per_image=0)
+    augment_and_save_data(valid_data_preprocessed, OUTPUT_PATH, 'valid', aug_identity, aug_per_image=0)
+    augment_and_save_data(test_data_preprocessed, OUTPUT_PATH, 'test', aug_identity, aug_per_image=0)
+
+    shutil.copy(f"{DATASET_PATH}/data.yaml", f"{OUTPUT_PATH}/data.yaml")
 
     print("\nPreprocessing and augmentation complete!")
