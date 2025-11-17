@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Similar Images</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            color: #0056b3;
+        }
+        #image-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-evenly;
+            gap: 10px;
+            padding: 5px;
+        }
+        .image-group {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 5px;
+            background-color: #fff;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 5px;
+        }
+        .image-group img {
+            max-width: 10vw;
+            height: auto;
+            border-radius: 4px;
+            border: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <h1>Similar Images</h1>
+    <div id="image-container"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const imageContainer = document.getElementById('image-container');
+            const filePath = 'similar.txt';
+            // Removes this part from paths in similar.txt
+            const basePath = 'C:\\Users\\USER\\Documents\\FYP\\child_gender';
+
+            fetch(filePath)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    return response.text();
+                })
+                .then(data => {
+                    const similarImages = parseSimilarTxt(data, basePath);
+                    displayImages(similarImages, imageContainer);
+                })
+                .catch(error => {
+                    console.error('Error fetching or parsing similar.txt:', error);
+                    imageContainer.innerHTML = `<p>Error loading similar images: ${error.message}</p>`;
+                });
+
+            function parseSimilarTxt(text, basePath) {
+                const lines = text.split('\n');
+                const similarImageGroups = [];
+                let currentGroup = [];
+
+                lines.forEach(line => {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.startsWith('-')) {
+                        if (currentGroup.length > 0) {
+                            similarImageGroups.push(currentGroup);
+                        }
+                        // The first image in a group doesn't have a reason
+                        currentGroup = [{ path: trimmedLine.substring(1).trim(), reason: 'original' }];
+                    } else if (trimmedLine !== '') {
+                        const parts = trimmedLine.split('::');
+                        const imagePath = parts[0].trim();
+                        const reason = parts.length > 1 ? parts[1].trim() : 'unknown';
+                        currentGroup.push({ path: imagePath, reason: reason });
+                    }
+                });
+
+                if (currentGroup.length > 0) {
+                    similarImageGroups.push(currentGroup);
+                }
+
+                return similarImageGroups.map(group => {
+                    return group.map(item => ({
+                        path: item.path.replace(basePath, '').replace(/\\/g, '/'),
+                        reason: item.reason
+                    }));
+                });
+            }
+
+            function displayImages(similarImageGroups, container) {
+                similarImageGroups.forEach(group => {
+                    const groupDiv = document.createElement('div');
+                    groupDiv.classList.add('image-group');
+
+                    group.forEach(item => {
+                        const imgContainer = document.createElement('div');
+                        imgContainer.style.display = 'flex';
+                        imgContainer.style.flexDirection = 'column';
+                        imgContainer.style.alignItems = 'center';
+                        imgContainer.style.margin = '5px';
+
+                        const img = document.createElement('img');
+                        img.src = item.path;
+                        img.alt = "Similar Image";
+                        imgContainer.appendChild(img);
+
+                        const reasonSpan = document.createElement('span');
+                        reasonSpan.textContent = item.reason;
+                        reasonSpan.style.fontSize = '0.8em';
+                        reasonSpan.style.marginTop = '3px';
+                        reasonSpan.style.color = '#555';
+                        imgContainer.appendChild(reasonSpan);
+
+                        groupDiv.appendChild(imgContainer);
+                    });
+
+                    container.appendChild(groupDiv);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
