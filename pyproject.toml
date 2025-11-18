@@ -16,6 +16,7 @@ dependencies = [
     "nbformat>=5.10.4",
     "opencv-python~=4.12.0.88",
     "pandas~=2.2.2",
+    "pillow>=12.0.0",
     "roboflow~=1.2.11",
     "scikit-image>=0.25.2",
     "scipy-stubs>=1.16.3.0",
