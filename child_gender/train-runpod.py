@@ -20,7 +20,7 @@ os.system('pip install -q ultralytics gdown') # MAGIC: %pip install -q ultralyti
 
 # NEXT CELL
 
-os.system(f"gdown --fuzzy 'https://drive.google.com/file/d/11tsGuerUAMnfYuOSgn-IS5iRbIPjQA2j/view?usp=sharing' -O {home}/dataset.zip") # BANG: !gdown --fuzzy 'https://drive.google.com/file/d/11tsGuerUAMnfYuOSgn-IS5iRbIPjQA2j/view?usp=sharing' -O {home}/dataset.zip
+os.system(f"gdown --fuzzy 'https://drive.google.com/file/d/1dKFfXfO0opSOiH_Ocfcpiy3SJifzeJdy/view?usp=sharing' -O {home}/dataset.zip") # BANG: !gdown --fuzzy 'https://drive.google.com/file/d/1dKFfXfO0opSOiH_Ocfcpiy3SJifzeJdy/view?usp=sharing' -O {home}/dataset.zip
 os.system(f"mkdir -p {home}/dataset") # BANG: !mkdir -p {home}/dataset
 os.system(f"rm -rf {home}/dataset") # BANG: !rm -rf {home}/dataset
 os.system(f"unzip -q {home}/dataset.zip -d {home}/dataset") # BANG: !unzip -q {home}/dataset.zip -d {home}/dataset
@@ -51,8 +51,8 @@ os.system(f"rm -rf {runs_path}") # BANG: !rm -rf {runs_path}
 
 model_names = (
   "yolo12n.pt",
-  "yolo12s.pt",
-  "yolo12m.pt",
+  # "yolo12s.pt",
+  # "yolo12m.pt",
   # "yolo12l.pt",
   # "yolo12x.pt"
 )
@@ -77,15 +77,17 @@ for nr, model_name in enumerate(model_names):
     optimizer="AdamW",
 
     # NOTE: see online visualizations of the augmentations too
-    mosaic=0.2, # mosaic augmentation chance
-    close_mosaic=30, # stops mosaic augmentation for last N epochs
+    mosaic=0.7, # mosaic augmentation chance
+    close_mosaic=20, # stops mosaic augmentation for last N epochs
     copy_paste=0.2, # copy paste augmentation chance
-    erasing=0.2, # erasing augmentation chance
+    erasing=0.45, # erasing augmentation chance
 
-    hsv_h=0.015, hsv_s=0.3, hsv_v=0.3, # max hue, saturation, value shift range
-    scale=0.15, # max scaling range
-    translate=0.1, # max translation range
+    hsv_h=0.015, hsv_s=0.7, hsv_v=0.5, # max hue, saturation, value shift range
+    scale=0.6, # max scaling range
+    translate=0.2, # max translation range
     degrees=15, # max rotation range
+
+    device=[0,1] # use multiple GPUs
   )
 
   best_model_path = f'{runs_path}/train{train_nr}/weights/best.pt'
