@@ -4,6 +4,9 @@ import os
 import re
 from PIL import Image, ImageDraw
 from dataclasses import dataclass
+from collections import Counter
+from typing import Optional
+from ultralytics import YOLO
 
 IMAGE_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
 
@@ -117,60 +120,120 @@ def yolo_to_readable_bbox(
   return "; ".join(readable_boxes)
 
 
+def load_yolo_model(
+  model_path: str,
+) -> YOLO:
+  """
+  Loads a YOLO model from the specified path.
+
+  Args:
+    model_path (str): The path to the YOLO model file (e.g., 'my-yolov12s.pt').
+
+  Returns:
+    YOLO: The loaded YOLO model.
+  """
+  return YOLO(model_path)
+
+
+def count_yolo_detections(
+  model: YOLO,
+  image_path: str,
+  class_names: list[str],
+) -> dict[str, int]:
+  """
+  Performs inference with a YOLO model on an image and counts detections per class.
+
+  Args:
+    model (YOLO): The loaded YOLO model.
+    image_path (str): The path to the image file.
+    class_names (list[str]): A list of class names, where index corresponds to class_id.
+
+  Returns:
+    dict[str, int]: A dictionary where keys are class names and values are their counts.
+  """
+  # TODO this is bad, load once not every time this is called
+  results = model(image_path, verbose=False)
+  detected_class_ids = []
+  for r in results:
+    if r.boxes:
+      for box in r.boxes:
+        detected_class_ids.append(int(box.cls))
+
+  class_counts = Counter(detected_class_ids)
+  named_class_counts = {
+    class_names[class_id]: count
+    for class_id, count in class_counts.items()
+    if class_id < len(class_names)
+  }
+  return named_class_counts
+
+
+def parse_multiple_locations(
+  decoded_output: str,
+) -> list[dict]:
+  """
+  Helper function to parse multiple <loc> tags and return a list of coordinate sets and labels.
+  """
+  loc_pattern = r"<loc(\d{4})><loc(\d{4})><loc(\d{4})><loc(\d{4})>\s+(\w+)"
+  matches = re.findall(loc_pattern, decoded_output)
+  coords_and_labels = []
+  for match in matches:
+      y1 = int(match[0]) / 1024.0
+      x1 = int(match[1]) / 1024.0
+      y2 = int(match[2]) / 1024.0
+      x2 = int(match[3]) / 1024.0
+      label = match[4]
+      coords_and_labels.append({
+          'label': label,
+          'bbox': [y1, x1, y2, x2]  # normalized [0,1]: y_min, x_min, y_max, x_max
+      })
+  return coords_and_labels
+
+
 def parse_response_to_yolo_bbox(
   paligemma_output: str,
   image_width: int,
   image_height: int,
   class_names: list[str],
   model_input_size: int = 448, # Default to 448 as per PaliGemma2-3b-mix-448
+  fail_on_error: bool = False,
 ) -> list[list[float]]:
   """
-  Parses PaliGemma2's free-form text output into YOLO format annotations.
+  Parses PaliGemma2's <locXXXX> token output into YOLO format annotations.
 
   Args:
-    paligemma_output (str): The text output from PaliGemma2 describing bounding boxes.
+    paligemma_output (str): The text output from PaliGemma2 with <locXXXX> for bboxes.
     image_width (int): The width of the original image.
     image_height (int): The height of the original image.
     class_names (list of str): A list of class names, where index corresponds to class_id.
     model_input_size (int): The input size of the model (default 448).
+    fail_on_error (bool): If True, return empty list on parse error.
 
   Returns:
     list of lists: A list of YOLO format annotations: [class_id, x_center, y_center, width, height].
   """
+  # Use helper to parse detections
+  detections = parse_multiple_locations(paligemma_output)
   yolo_annotations = []
-  # Example expected format: "class object 'person' at [x_min=100, y_min=100, x_max=200, y_max=200]; ..."
-  pattern = r"class object '([^']+)' at \[x_min=(\d+), y_min=(\d+), x_max=(\d+), y_max=(\d+)\]"
-  matches = re.findall(pattern, paligemma_output)
 
-  for match in matches:
-    class_name_str, x_min_str, y_min_str, x_max_str, y_max_str = match
+  for det in detections:
+    label = det['label'].lower()
+    y_min_norm, x_min_norm, y_max_norm, x_max_norm = det['bbox']
+
     try:
-      class_id = class_names.index(class_name_str)
+      # Exact match for class_id
+      class_id = class_names.index(label)
     except ValueError:
-      print(f"Warning: Class name '{class_name_str}' not found in provided class_names. Skipping this annotation.")
+      print(f"Warning: Class name '{label}' not found in class_names. Skipping.")
+      if fail_on_error:
+        return []
       continue
 
-    x_min_model, y_min_model, x_max_model, y_max_model = int(x_min_str), int(y_min_str), int(x_max_str), int(y_max_str)
-
-    # Scale from model input size to original image dimensions
-    scale_x = image_width / model_input_size
-    scale_y = image_height / model_input_size
-
-    x_min = x_min_model * scale_x
-    y_min = y_min_model * scale_y
-    x_max = x_max_model * scale_x
-    y_max = y_max_model * scale_y
-
-    # Convert to YOLO format
-    width = x_max - x_min
-    height = y_max - y_min
-    x_center = x_min + width / 2
-    y_center = y_min + height / 2
-
-    x_center_norm = x_center / image_width
-    y_center_norm = y_center / image_height
-    width_norm = width / image_width
-    height_norm = height / image_height
+    # Convert to YOLO format (normalized [0,1])
+    x_center_norm = (x_min_norm + x_max_norm) / 2
+    y_center_norm = (y_min_norm + y_max_norm) / 2
+    width_norm = x_max_norm - x_min_norm
+    height_norm = y_max_norm - y_min_norm
 
     yolo_annotations.append([
       float(class_id),
@@ -179,6 +242,7 @@ def parse_response_to_yolo_bbox(
       round(width_norm, 6),
       round(height_norm, 6),
     ])
+
   return yolo_annotations
 
 def parse_response_to_yolo_segmentation(
@@ -302,26 +366,97 @@ def create_segmentation_prompt(
     "Repeat for each object."
   )
 
-def save_segmentations_to_file(
+def process_paligemma_detections(
+  paligemma_output: str,
+  image_width: int,
+  image_height: int,
+  class_names: list[str],
+  yolo_model: YOLO,
+  image_path: str,
+  model_input_size: int = 448,
+  fail_on_error: bool = False,
+) -> list[list[float]]:
+  """
+  Processes PaliGemma2's detection output, compares detected classes with YOLO,
+  and returns YOLO-formatted annotations only if class sets agree.
+
+  Args:
+    paligemma_output (str): The text output from PaliGemma2 with <locXXXX> for bboxes.
+    image_width (int): The width of the original image.
+    image_height (int): The height of the original image.
+    class_names (list of str): A list of class names, where index corresponds to class_id.
+    yolo_model (YOLO): The loaded YOLO model for comparison.
+    image_path (str): The path to the image file for YOLO inference.
+    model_input_size (int): The input size of the model (default 448).
+    fail_on_error (bool): If True, return empty list on parse error.
+
+  Returns:
+    list of lists: A list of YOLO format annotations: [class_id, x_center, y_center, width, height],
+                   or an empty list if class sets disagree or parsing fails.
+  """
+  # 1. Parse PaliGemma's output
+  paligemma_annotations = parse_response_to_yolo_bbox(
+    paligemma_output, image_width, image_height, class_names, model_input_size, fail_on_error
+  )
+
+  # Extract unique class names detected by PaliGemma
+  paligemma_detected_classes = set(
+    class_names[int(ann[0])] for ann in paligemma_annotations
+  )
+
+  # 2. Get YOLO's detected class counts and extract unique class names
+  yolo_detected_counts = count_yolo_detections(yolo_model, image_path, class_names)
+  yolo_detected_classes = set(yolo_detected_counts.keys())
+
+  # 3. Compare the sets of detected class names
+  if paligemma_detected_classes != yolo_detected_classes:
+    print(f"Disagreement in detected classes for {os.path.basename(image_path)}:")
+    print(f"  PaliGemma detected: {paligemma_detected_classes}")
+    print(f"  YOLO detected: {yolo_detected_classes}")
+    print("No annotations will be created due to disagreement.")
+    return [] # Disagreement, return empty annotations
+  else:
+    return paligemma_annotations # Agreement, return PaliGemma's annotations
+
+
+def create_detection_prompt(
+  class_labels: list[str],
+  class_counts: Optional[dict[str, int]] = None, # This parameter is now ignored as per new requirement
+) -> str:
+  """
+  Creates a detection prompt for PaliGemma2 to detect objects with bounding boxes.
+  The prompt will ask to detect all specified classes, ignoring any counts.
+
+  Args:
+    class_labels (list[str]): A list of class names to detect.
+    class_counts (dict[str, int], optional): This parameter is ignored as per new requirement.
+
+  Returns:
+    str: The detection prompt as per PaliGemma researchers.
+  """
+  # Reverted to always asking to detect all classes, ignoring class_counts
+  return f"detect {' ; '.join(class_labels)}\n"
+
+def save_annotations_to_file(
   image_name: str,
   dataset_path: str,
-  updated_segmentations: list[list[float]],
+  annotations: list[list[float]],
 ) -> None:
   """
-  Saves YOLO segmentation annotations to a label file.
+  Saves YOLO annotations (bbox or segmentation) to a label file.
 
   Args:
     image_name (str): The base name of the image file (e.g., "image.jpg").
     dataset_path (str): The path to the dataset directory.
-    updated_segmentations (list of lists): A list of YOLO segmentation format annotations.
+    annotations (list of lists): A list of YOLO format annotations.
   """
   output_label_path = os.path.join(dataset_path, "labels", os.path.splitext(image_name)[0] + ".txt")
-  if updated_segmentations:
+  if annotations:
     with open(output_label_path, 'w') as f:
-      for ann in updated_segmentations:
+      for ann in annotations:
         f.write(f"{int(ann[0])} {' '.join(map(str, ann[1:]))}\n")
   else:
-    print(f"No valid segmentations parsed for {image_name}. Skipping file write.")
+    print(f"No valid annotations parsed for {image_name}. Skipping file write.")
 
 # A list of distinct colors in RGB format
 COLORS = [
@@ -349,10 +484,75 @@ def _get_color_for_class(class_id: int) -> tuple[tuple[int, int, int], tuple[int
     (outline_color_rgb, fill_color_rgba).
   """
   outline_rgb = COLORS[class_id % NUM_COLORS]
-  # Use a semi-transparent version for the fill (e.g., 20% opacity)
-  fill_rgba = outline_rgb + (51,) # 51 is approx 20% of 255
+  # Use a semi-transparent version for the fill (e.g., 25% opacity)
+  fill_rgba = outline_rgb + (64,) # 64 is approx 25% of 255
 
   return outline_rgb, fill_rgba
+
+def draw_bboxes_on_image(
+  image: Image.Image,
+  yolo_bboxes: list[list[float]],
+  class_names: list[str],
+) -> Image.Image:
+  """
+  Draws YOLO bounding box annotations on an image.
+
+  Args:
+    image (PIL.Image.Image): The input image.
+    yolo_bboxes (list of lists): A list of YOLO bbox format annotations:
+                                 [class_id, x_center_norm, y_center_norm, width_norm, height_norm].
+    class_names (list of str): A list of class names, where index corresponds to class_id.
+
+  Returns:
+    PIL.Image.Image: The image with drawn bounding boxes.
+  """
+  if image.mode != 'RGBA':
+    image = image.convert('RGBA')
+  draw = ImageDraw.Draw(image)
+  image_width, image_height = image.size
+
+  for bbox in yolo_bboxes:
+    class_id = int(bbox[0])
+    x_center_norm, y_center_norm, width_norm, height_norm = bbox[1:]
+
+    if class_id < 0 or class_id >= len(class_names):
+      print(f"Warning: Invalid class_id {class_id}. Skipping bbox.")
+      continue
+
+    # Denormalize coordinates
+    x_center = x_center_norm * image_width
+    y_center = y_center_norm * image_height
+    width = width_norm * image_width
+    height = height_norm * image_height
+
+    x_min = x_center - width / 2
+    y_min = y_center - height / 2
+    x_max = x_center + width / 2
+    y_max = y_center + height / 2
+
+    outline_color, fill_color = _get_color_for_class(class_id)
+
+    # Draw bounding box
+    draw.rectangle([x_min, y_min, x_max, y_max], outline=outline_color, width=2)
+
+    # Draw class name above the box
+    class_name = class_names[class_id]
+
+    text_bbox = draw.textbbox((x_min, y_min - 20), class_name)
+    text_x_min, text_y_min, text_x_max, text_y_max = text_bbox
+
+    padding = 2
+    bg_x_min = text_x_min - padding
+    bg_y_min = text_y_min - padding
+    bg_x_max = text_x_max + padding
+    bg_y_max = text_y_max + padding
+
+    draw.rectangle((bg_x_min, bg_y_min, bg_x_max, bg_y_max), fill=(255, 255, 255, 128))
+
+    draw.text((x_min, y_min - 20), class_name, fill=outline_color)
+
+  return image
+
 
 def draw_segmentations_on_image(
   image: Image.Image,
@@ -371,6 +571,8 @@ def draw_segmentations_on_image(
   Returns:
     PIL.Image.Image: The image with drawn segmentation polygons.
   """
+  if image.mode != 'RGBA':
+    image = image.convert('RGBA')
   draw = ImageDraw.Draw(image)
   image_width, image_height = image.size
 
